@@ -1,0 +1,5 @@
+{
+  "name": "notibridge",
+  "owner": { "name": "Ak1Ena" },
+  "plugins": [{ "name": "notibridge", "source": "./claude-mod/notibridge" }]
+}
