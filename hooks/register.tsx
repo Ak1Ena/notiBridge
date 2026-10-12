@@ -1,6 +1,6 @@
-import type { Register } from 'claude-code'
+import type { EngineInterface, PluginOptions, Register } from 'claude-code'
 
-// shortcut: fixed URL and agent name; make them userConfig options if the server moves or several sessions share one board.
+// shortcut: fixed port and agent name; make them userConfig options if several boards or agents share one machine.
 const BOARD = 'http://127.0.0.1:7788'
 const AGENT = 'claude-code'
 const COMPRESS_OVER = 1500 // chars of card context before it goes through headroom
@@ -35,7 +35,36 @@ async function api<T>(fetch: Fetch, path: string, body?: unknown): Promise<T | n
 
 const line = (c: Card) => `#${c.id} [${c.kind}/${c.priority}] ${c.title}${c.agent ? ` (${c.agent})` : ''}`
 
-export const register: Register = on => {
+// The mod runs the board server itself: no `bun run start` needed. It lives as long as this
+// session; another session that finds the board offline starts its own (the port admits one).
+let isServerStarting = false
+
+async function startServer($: EngineInterface, options: PluginOptions) {
+  if (isServerStarting) return
+  isServerStarting = true
+  $.ui.status('board starting…')
+  const home = await $.env.get('HOME')
+  const env: Record<string, string> = {
+    DB_PATH: `${home}/.notibridge/notibridge.db`,
+    CLASSIFIERS: String(options.classifiers ?? 'jev,laya,llama,embed,keyword'),
+    LAYA_URL: String(options.laya_url ?? 'http://127.0.0.1:8010/v1/systemone'),
+    NOTIF_MAC: options.mac_notifications === false ? '0' : '1',
+  }
+  if (options.laya_model) env.LAYA_MODEL = String(options.laya_model)
+  if (options.typesafe_api_key) env.TYPESAFE_API_KEY = String(options.typesafe_api_key)
+  void (async () => {
+    try {
+      const server = $.process.spawn({ argv: ['bun', `${$.plugin.root}/src/server.ts`], cwd: $.plugin.root, env })
+      for await (const { text } of server) $.ui.log(text.trimEnd(), { to: 'debug' })
+    } catch {
+      $.ui.status('board needs bun: https://bun.sh')
+    } finally {
+      isServerStarting = false
+    }
+  })()
+}
+
+export const register: Register = (on, options) => {
   let cards: Card[] = []
   const active = () => cards.find(c => c.status === 'doing' && c.agent === AGENT)
 
@@ -48,7 +77,7 @@ export const register: Register = on => {
         const mine = active()
         $.ui.status(`board ${count('todo')} todo · ${count('doing')} doing${mine ? ` · on #${mine.id}` : ''}`)
       } catch {
-        $.ui.status('board offline')
+        await startServer($, options)
       }
     }
 
@@ -82,7 +111,7 @@ export const register: Register = on => {
     try {
       cards = (await api<Card[]>((u, i) => $.http.fetch(u, i), '/api/cards')) ?? []
     } catch {
-      return { text: `notiBridge board offline at ${BOARD}. Start it: bun run start` }
+      return { text: `notiBridge board at ${BOARD} is starting or offline; try again in a few seconds. Needs bun (https://bun.sh).` }
     }
     const col = (s: Card['status'], name: string) => {
       const list = cards.filter(c => c.status === s)
@@ -125,14 +154,14 @@ export const register: Register = on => {
         headroom,
       },
     }
-  }).catch(($, e, next) => ({ deny: `notiBridge board unreachable at ${BOARD}: ${String(next.error?.message ?? next.error?.kind ?? 'error')}. Start it with: bun run start` }))
+  }).catch(($, e, next) => ({ deny: `notiBridge board unreachable at ${BOARD}: ${String(next.error?.message ?? next.error?.kind ?? 'error')}. The mod starts it automatically; retry shortly.` }))
 
   on('tool.call', { tool: TOOL_UPDATE }, async ($, e) => {
     const input = e as unknown as { id: number; status: Card['status']; note?: string }
     const card = await api<Card>((u, i) => $.http.fetch(u, i), `/api/cards/${input.id}`, { status: input.status, note: input.note })
     if (card) cards = [...cards.filter(c => c.id !== card.id), card]
     return { result: { updated: card && line(card), status: card?.status } }
-  }).catch(($, e, next) => ({ deny: `notiBridge board unreachable at ${BOARD}: ${String(next.error?.message ?? next.error?.kind ?? 'error')}. Start it with: bun run start` }))
+  }).catch(($, e, next) => ({ deny: `notiBridge board unreachable at ${BOARD}: ${String(next.error?.message ?? next.error?.kind ?? 'error')}. The mod starts it automatically; retry shortly.` }))
 
   // While this session works a board card, remind the model to keep context headroom.
   on('prompt.compose', async ($, e, next) => {

@@ -1,4 +1,6 @@
 import { Database } from 'bun:sqlite'
+import { mkdirSync } from 'node:fs'
+import { dirname } from 'node:path'
 import type { Decision } from './classify'
 
 export type Status = 'todo' | 'doing' | 'done'
@@ -22,6 +24,7 @@ export type Card = {
 export type Message = { source: string; text: string; author?: string; channel?: string; url?: string; externalId?: string }
 
 export function openStore(path = process.env.DB_PATH ?? 'notibridge.db') {
+  if (path !== ':memory:') mkdirSync(dirname(path), { recursive: true })
   const db = new Database(path, { create: true })
   db.run('PRAGMA journal_mode = WAL')
   db.run(`CREATE TABLE IF NOT EXISTS cards (

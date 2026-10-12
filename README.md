@@ -9,14 +9,25 @@ macOS notifs ─┘   jev > laya > llama >          └──> Claude Code mod (
                   embed > keyword                                    claim -> headroom_compress -> work -> done
 ```
 
-## Run
+## Install (Claude Code mod)
+
+```
+/plugin install notibridge --marketplace Ak1Ena/notiBridge
+```
+
+Answer `y` to add the marketplace, then pick a scope. Needs [Bun](https://bun.sh) on your PATH. Nothing else to run: the mod starts the board server itself when a session starts, and the status line shows `board 3 todo · 1 doing`. Open http://127.0.0.1:7788 for the board.
+
+Settings (decision models, Laya URL, TypeSafe key, macOS notifications) are in `/config` under notibridge. Cards are kept in `~/.notibridge/notibridge.db`.
+
+The server lives as long as the Claude Code session that started it. If you close that session while another one is open, the other one starts the server again within 15 seconds.
+
+## Run without Claude Code
 
 ```sh
 bun run start        # board at http://127.0.0.1:7788
-bun test
+bun test             # server tests
+claude plugin test . # mod tests
 ```
-
-Needs [Bun](https://bun.sh). No dependencies.
 
 ## Decision model
 
@@ -86,18 +97,11 @@ The board and API have no auth and listen on localhost only; keep `HOST` at `127
 
 ## Claude Code mod
 
-Install (repo is private, so your GitHub account needs access):
-
-```
-/plugin install notibridge --marketplace Ak1Ena/notiBridge
-```
-
-or for development: `claude --plugin-dir claude-mod/notibridge`.
-
+- Starts the board server (`bun src/server.ts`) when the board is offline
 - Status line: `board 3 todo · 1 doing · on #7`
 - `/board`: lists the board
 - `/next-task`: the agent claims the top card, does it, marks it done
 - Tools `board_claim` / `board_update` the model calls directly
 - Headroom: card context over 1500 chars goes through `headroom_compress` (needs the headroom MCP server connected as `headroom`); while a card is in progress the system prompt tells the agent to compress large outputs and retrieve originals only when needed.
 
-Mod tests: `claude plugin test claude-mod/notibridge`.
+For development: `claude --plugin-dir .`

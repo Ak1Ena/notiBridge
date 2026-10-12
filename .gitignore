@@ -2,3 +2,5 @@ node_modules
 *.db
 *.db-*
 .env
+.claude-plugin/types/
+tsconfig.json

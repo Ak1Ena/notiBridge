@@ -1,0 +1,39 @@
+{
+  "name": "notibridge",
+  "version": "0.2.0",
+  "description": "Chat messages to a kanban board, run by Claude Code: starts the notiBridge server, board status line, /board, /next-task, claim/update tools with headroom context compression",
+  "author": { "name": "Ak1Ena" },
+  "userConfig": {
+    "classifiers": {
+      "type": "string",
+      "title": "Decision models",
+      "description": "Comma list tried in order: jev, laya, llama, embed, keyword",
+      "default": "jev,laya,llama,embed,keyword"
+    },
+    "laya_url": {
+      "type": "string",
+      "title": "Laya server URL",
+      "description": "laya-serve /v1/systemone endpoint",
+      "default": "http://127.0.0.1:8010/v1/systemone"
+    },
+    "laya_model": {
+      "type": "string",
+      "title": "Laya checkpoint",
+      "description": "english, multilingual, typed-decisions, or empty to auto-route by language",
+      "default": "english"
+    },
+    "typesafe_api_key": {
+      "type": "string",
+      "title": "TypeSafe API key (Jev)",
+      "description": "From console.typesafe.ai; empty skips Jev",
+      "sensitive": true,
+      "default": ""
+    },
+    "mac_notifications": {
+      "type": "boolean",
+      "title": "Read macOS notifications",
+      "description": "Turn Slack/Teams/LINE/Discord banners into cards (needs Full Disk Access for your terminal)",
+      "default": true
+    }
+  }
+}
