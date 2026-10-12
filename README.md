@@ -5,8 +5,8 @@ Chat messages in, kanban cards out. notiBridge listens to Slack, any webhook, an
 ```
 Slack Events ─┐
 POST /ingest ─┼─> decision model ──> SQLite board ──> web board (http://127.0.0.1:7788)
-macOS notifs ─┘   llama > embed >                └──> Claude Code mod (/board, /next-task)
-                  keyword                               claim -> headroom_compress -> work -> done
+macOS notifs ─┘   jev > laya > llama >          └──> Claude Code mod (/board, /next-task)
+                  embed > keyword                                    claim -> headroom_compress -> work -> done
 ```
 
 ## Run
@@ -20,15 +20,34 @@ Needs [Bun](https://bun.sh). No dependencies.
 
 ## Decision model
 
-Chain set by `CLASSIFIERS` (default `llama,embed,keyword`). First one that answers wins, so the bridge works with no model running.
+The `CLASSIFIERS` setting lists classifiers in order (default `jev,laya,llama,embed,keyword`). The first one that answers wins. One that isn't set up, or that is unsure, passes to the next. With nothing set up, the keyword classifier still sorts messages.
 
-| name | how | needs |
+| name | what | setup |
 | --- | --- | --- |
-| `llama` | Llama via Ollama, JSON-schema constrained answer (`kind`, `title`, `priority`) | `ollama pull llama3.2` |
-| `embed` | JEPA-style: embeds the message and picks the nearest label prototype in embedding space, no generation | `ollama pull nomic-embed-text` |
+| `jev` | [TypeSafe Jev](https://typesafe.ai/blog/introducing-system-one-models-and-jev), hosted System One decision model | `TYPESAFE_API_KEY` from [console.typesafe.ai](https://console.typesafe.ai/keys) |
+| `laya` | [Laya](https://huggingface.co/convaiinnovations/laya), open-weight System One model (Apache 2.0), self-hosted | `pip install "laya[serve]"` then `LAYA_HOST=127.0.0.1 laya-serve` |
+| `llama` | Llama via Ollama, JSON-schema constrained | `ollama pull llama3.2` |
+| `embed` | nearest label prototype in embedding space, via Ollama | `ollama pull nomic-embed-text` |
 | `keyword` | regex fallback | nothing |
 
-Env: `OLLAMA_URL` (default `http://127.0.0.1:11434`), `LLAMA_MODEL`, `EMBED_MODEL`. Prototypes live in `src/classify.ts` (`PROTOTYPES`); add examples from your team's chat to tune the embedding classifier.
+Jev and Laya use the same `POST /v1/systemone` protocol. notiBridge sends each message as `state` plus two typed questions:
+- `kind`: a Choice of issue, task, feature or none
+- `priority`: a Score from "can wait" to "urgent"
+
+If the `kind` answer's calibrated confidence is under `SYSTEMONE_MIN_CONFIDENCE` (default `0.4`), the next classifier decides instead. The card's model field shows who decided and how sure it was, e.g. `laya:english (0.91)`.
+
+```sh
+TYPESAFE_API_KEY=... bun run start                       # Jev first
+CLASSIFIERS=laya,keyword bun run start                   # open-source only, fully local
+LAYA_MODEL=multilingual bun run start                    # force Laya checkpoint (default: auto-routes by language, e.g. Thai goes to multilingual)
+```
+
+Other settings:
+- Jev: `JEV_MODEL` (default `jev-latest`), `JEV_URL`
+- Laya: `LAYA_URL` (default `http://127.0.0.1:8000/v1/systemone`), `LAYA_API_KEY` (if `laya-serve` runs with one)
+- Ollama: `OLLAMA_URL`, `LLAMA_MODEL`, `EMBED_MODEL`
+
+Run `laya-serve` with `LAYA_HOST=127.0.0.1`: it binds `0.0.0.0` by default.
 
 ## Sources
 

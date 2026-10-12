@@ -1,5 +1,5 @@
 import { expect, test } from 'bun:test'
-import { classify, cosine, keyword } from './classify'
+import { classify, cosine, jev, keyword, laya } from './classify'
 import { createApp } from './server'
 import { slackEventToMessage, verifySlack } from './sources'
 import { openStore } from './store'
@@ -55,4 +55,43 @@ test('ingest, dedupe, priority claim, update via HTTP', async () => {
   const done = await app(new Request(`http://x/api/cards/${first.id}`, { method: 'PATCH', body: JSON.stringify({ status: 'done', note: 'fixed' }) }))
   expect(await done.json()).toMatchObject({ status: 'done', note: 'fixed' })
   expect((await app(new Request(`http://x/api/cards/${first.id}`, { method: 'PATCH', body: JSON.stringify({ status: 'bogus' }) }))).status).toBe(400)
+})
+
+test('jev and laya speak /v1/systemone; low confidence falls through', async () => {
+  const seen: { auth: string | null; body: any }[] = []
+  let confidence = 0.9
+  const fake = Bun.serve({
+    port: 0,
+    async fetch(req) {
+      const body = await req.json()
+      seen.push({ auth: req.headers.get('authorization'), body })
+      return Response.json({
+        model: 'fake-1',
+        answers: {
+          kind: { type: 'choice', choice: 'issue', confidence, probabilities: { issue: 0.9, task: 0.05, feature: 0.05, none: 0 } },
+          priority: { type: 'score', score: 2, confidence: 1, probabilities: { 0: 0, 1: 0, 2: 1 } },
+        },
+      })
+    },
+  })
+  const url = `http://127.0.0.1:${fake.port}/v1/systemone`
+  Object.assign(process.env, { LAYA_URL: url, JEV_URL: url, TYPESAFE_API_KEY: 'k' })
+  try {
+    expect(await laya('checkout is down')).toMatchObject({ kind: 'issue', priority: 'high', model: 'laya:fake-1 (0.90)' })
+    expect(seen[0]!.auth).toBeNull()
+    expect(Object.keys(seen[0]!.body.questions.kind.criteria)).toEqual(['issue', 'task', 'feature', 'none'])
+
+    expect((await jev('checkout is down')).model).toStartWith('jev:')
+    expect(seen[1]!).toMatchObject({ auth: 'Bearer k', body: { model: 'jev-latest' } })
+
+    confidence = 0.1
+    expect((await classify('checkout is broken', ['laya', 'keyword'])).model).toBe('keyword')
+
+    delete process.env.TYPESAFE_API_KEY
+    await expect(jev('x')).rejects.toThrow('TYPESAFE_API_KEY')
+  } finally {
+    fake.stop()
+    delete process.env.LAYA_URL
+    delete process.env.JEV_URL
+  }
 })

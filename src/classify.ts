@@ -1,5 +1,5 @@
 // Decision model: is a message an issue, task, feature, or noise?
-// Pluggable chain (CLASSIFIERS env, default "llama,embed,keyword"): first one that answers wins.
+// Pluggable chain (CLASSIFIERS env, default "jev,laya,llama,embed,keyword"): first one that answers wins.
 
 export type Kind = 'issue' | 'task' | 'feature' | 'none'
 export type Priority = 'low' | 'med' | 'high'
@@ -27,6 +27,59 @@ async function ollama(path: string, body: unknown) {
   if (!res.ok) throw new Error(`ollama ${path} ${res.status}`)
   return res.json() as Promise<any>
 }
+
+// System One decision models: TypeSafe Jev (hosted) and Laya (open weights, self-hosted `laya-serve`)
+// share the same POST /v1/systemone protocol: a state plus typed questions in, calibrated answers out.
+const LEVELS: Priority[] = ['low', 'med', 'high']
+const MIN_CONFIDENCE = Number(process.env.SYSTEMONE_MIN_CONFIDENCE ?? 0.4) // below this, let the next classifier decide
+
+const systemOne = (name: string, url: string, apiKey?: string, model?: string): Classifier => async text => {
+  const res = await fetch(url, {
+    method: 'POST',
+    headers: { 'content-type': 'application/json', ...(apiKey && { authorization: `Bearer ${apiKey}` }) },
+    body: JSON.stringify({
+      ...(model && { model }),
+      state: { message: text.slice(0, 8000) },
+      questions: {
+        kind: {
+          type: 'choice',
+          instructions: 'Classify this chat message for a software team kanban board.',
+          criteria: {
+            issue: 'something is broken: bug, error, crash, outage',
+            task: 'a concrete request someone has to do',
+            feature: 'a request for a new capability or an improvement',
+            none: 'chit-chat, thanks, FYI, or a question that needs no work',
+          },
+        },
+        priority: {
+          type: 'score',
+          instructions: 'How urgent is the work this message asks for?',
+          criteria: ['can wait', 'should happen this week', 'urgent: blocking, production down, or a deadline today'],
+        },
+      },
+    }),
+    signal: AbortSignal.timeout(15_000),
+  })
+  if (!res.ok) throw new Error(`${name} ${res.status} ${(await res.text()).slice(0, 200)}`)
+  const data = (await res.json()) as any
+  const { kind, priority } = data.answers
+  if (kind.confidence < MIN_CONFIDENCE) throw new Error(`${name} unsure (confidence ${kind.confidence})`)
+  return {
+    kind: kind.choice,
+    title: firstLine(text), // System One models never generate text
+    priority: LEVELS[Math.min(2, Math.max(0, Math.round(priority.score)))]!,
+    model: `${name}:${data.model ?? model ?? 'auto'} (${kind.confidence.toFixed(2)})`,
+  }
+}
+
+export const jev: Classifier = text => {
+  const key = process.env.TYPESAFE_API_KEY
+  if (!key) return Promise.reject(new Error('TYPESAFE_API_KEY not set'))
+  return systemOne('jev', process.env.JEV_URL ?? 'https://api.typesafe.ai/v1/systemone', key, process.env.JEV_MODEL ?? 'jev-latest')(text)
+}
+
+export const laya: Classifier = text =>
+  systemOne('laya', process.env.LAYA_URL ?? 'http://127.0.0.1:8000/v1/systemone', process.env.LAYA_API_KEY, process.env.LAYA_MODEL)(text)
 
 // Llama: generative decision with a JSON schema-constrained answer.
 export const llama: Classifier = async text => {
@@ -98,9 +151,9 @@ export const keyword: Classifier = async text => {
   return { kind, title: firstLine(text), priority: guessPriority(text), model: 'keyword' }
 }
 
-const REGISTRY: Record<string, Classifier> = { llama, embed: embedding, keyword }
+const REGISTRY: Record<string, Classifier> = { jev, laya, llama, embed: embedding, keyword }
 
-export async function classify(text: string, chain = (process.env.CLASSIFIERS ?? 'llama,embed,keyword').split(',')): Promise<Decision> {
+export async function classify(text: string, chain = (process.env.CLASSIFIERS ?? 'jev,laya,llama,embed,keyword').split(',')): Promise<Decision> {
   for (const name of chain) {
     const fn = REGISTRY[name.trim()]
     if (!fn) continue
