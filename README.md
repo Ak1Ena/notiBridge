@@ -49,6 +49,21 @@ Other settings:
 
 Run `laya-serve` with `LAYA_HOST=127.0.0.1`: it binds `0.0.0.0` by default.
 
+### Laya in Podman
+
+```sh
+git clone --depth 1 https://github.com/NandhaKishorM/laya.git
+podman build --build-arg TORCH_INDEX=cpu -t laya:local laya          # ~1.2 GB image
+podman run -d --name laya-serve -p 127.0.0.1:8010:8000 \
+  -e LAYA_PRELOAD=1 -e LAYA_MODELS=english -e LAYA_DEFAULT_MODEL=english -e LAYA_MAX_LOADED=1 \
+  -v laya-model-cache:/home/laya/.cache/huggingface laya:local laya-serve   # first start downloads ~1.6 GB
+curl localhost:8010/health
+
+CLASSIFIERS=laya,keyword LAYA_URL=http://127.0.0.1:8010/v1/systemone LAYA_MODEL=english bun run start
+```
+
+The English checkpoint uses about 2.3 GB of RAM on CPU and answers in about 0.6 s per message. Publish on `127.0.0.1` only: laya-serve has no auth unless `LAYA_API_KEY` is set.
+
 ## Sources
 
 **Generic webhook**: `POST /ingest` with `{ "text": "...", "source": "discord", "author": "...", "channel": "...", "url": "...", "externalId": "..." }`. Set `INGEST_TOKEN` to require `Authorization: Bearer <token>`.
